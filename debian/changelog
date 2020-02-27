@@ -1,0 +1,5 @@
+dde-wldpms (1.0.1-1) unstable; urgency=medium
+
+  * Initial release (Closes: #nnnn)  <nnnn is the bug number of your ITP>
+
+ -- guonafu <guonafu@uniontech.com>  Thu, 27 Feb 2020 17:00:11 +0800
