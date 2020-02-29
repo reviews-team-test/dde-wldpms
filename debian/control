@@ -2,7 +2,7 @@ Source: dde-wldpms
 Section: dever
 Priority: optional
 Maintainer: guonafu <guonafu@uniontech.com>
-Build-Depends: debhelper (>= 11)
+Build-Depends: debhelper (>= 11), libkf5wayland-dev, pkg-config, cmake, qtbase5-dev
 Standards-Version: 4.1.3
 Homepage: https://gitlab.deepin.io/kelvinu/dde-wldpms
 #Vcs-Browser: https://salsa.debian.org/debian/dde-wldpms
