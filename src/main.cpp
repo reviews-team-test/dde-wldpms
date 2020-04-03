@@ -1,4 +1,4 @@
-#include <QCoreApplication>
+#include <QGuiApplication>
 #include <QDebug>
 #include <QCommandLineOption>
 #include <QCommandLineParser>
@@ -194,14 +194,32 @@ void setDpms(Registry *reg)
     });
 }
 
+const QStringList ModeString = {"On", "Standby", "Suspend", "Off"};
+
+inline QString mode2string(Dpms::Mode mode) {
+//    switch(mode) {
+//	    case Dpms::Mode::On:
+//		return "On";
+//	    case Dpms::Mode::Off:
+//		return "Off";
+//	    case Dpms::Mode::Standby:
+//		return "Standby";
+//    }
+    return ModeString[int(mode)];
+}
+
+inline Dpms::Mode string2Mode(QString str) {
+    return Dpms::Mode(ModeString.indexOf(str));
+}    
 
 int main(int argc, char *argv[])
 {
-    QCoreApplication a(argc, argv);
+    qputenv("QT_QPA_PLATFORM", QByteArrayLiteral("wayland"));
+    QGuiApplication a(argc, argv);
 
-    auto conn = new ConnectionThread;
-    auto thread = new QThread;
-    Registry *reg = nullptr;
+//    auto conn = new ConnectionThread;
+//    auto thread = new QThread;
+//    Registry *reg = nullptr;
 
     // app name
     QCoreApplication::setApplicationName("dpms");
@@ -222,76 +240,145 @@ int main(int argc, char *argv[])
 
     parser.process(a);
 
-    conn->moveToThread(thread);
-    thread->start();
-
-    conn->initConnection();
-
-    QObject::connect(conn, &ConnectionThread::connected, [ & ] {
-
-        beConnect = true;
-        reg = new Registry;
-        reg->create(conn);
-        reg->setup();
-
-        bool tmp = false;
-        if (parser.isSet(getOption))
+    bool tmp = false;
+    bool isGet = false;
+    if (parser.isSet(getOption)) {
+        isGet = true;
+//        getDpms(reg);
+    } else if (parser.isSet(setOption)) {
+        isGet = false;
+        QString strSetOption = parser.value(setOption);
+        if (strSetOption.compare(QString("On"), Qt::CaseInsensitive) == 0)
         {
-            getDpms(reg);
-        }
-        else if (parser.isSet(setOption))
-        {
-            QString strSetOption = parser.value(setOption);
-            if (strSetOption.compare(QString("On"), Qt::CaseInsensitive) == 0)
-            {
-                mode = Dpms::Mode::On;
-                setDpms(reg);
-            }
-            else if (strSetOption.compare(QString("Off"), Qt::CaseInsensitive) == 0)
-            {
-                mode = Dpms::Mode::Off;
-                setDpms(reg);
-            }
-            else if (strSetOption.compare(QString("Standby"), Qt::CaseInsensitive) == 0)
-            {
-                mode = Dpms::Mode::Standby;
-                setDpms(reg);
-            }
-            else if (strSetOption.compare(QString("Suspend"), Qt::CaseInsensitive) == 0)
-            {
-                mode = Dpms::Mode::Suspend;
-                setDpms(reg);
-            }
-            else
-            {
-                parser.showHelp();
-            }
-        }
-        else
-        {
+            mode = Dpms::Mode::On;
+//            setDpms(reg);
+        } else if (strSetOption.compare(QString("Off"), Qt::CaseInsensitive) == 0) {
+            mode = Dpms::Mode::Off;
+//            setDpms(reg);
+        } else if (strSetOption.compare(QString("Standby"), Qt::CaseInsensitive) == 0) {
+            mode = Dpms::Mode::Standby;
+//            setDpms(reg);
+        } else if (strSetOption.compare(QString("Suspend"), Qt::CaseInsensitive) == 0) {
+            mode = Dpms::Mode::Suspend;
+//            setDpms(reg);
+        } else {
             parser.showHelp();
+            qApp->quit();
         }
-        int count = 100;
-        do {
-            beConnect = tmp;
-            conn->roundtrip();
-            QThread::msleep(100);
-        } while (beConnect && count--);
+    } else {
+        parser.showHelp();
+        qApp->quit();
+    }
 
-        if (count <= 0)
-        {
-            qDebug() << "time out";
-        }
+    ConnectionThread *conn = ConnectionThread::fromApplication();
+    Registry registry;
+    registry.create(conn);
+    auto reg = &registry;
 
-        if (conn)
-        {
-            conn->deleteLater();
-            thread->quit();
-        }
-        if (reg)
-            reg->deleteLater();
-        exit(0);
-    });
+//    conn->initConnection();
+
+    QObject::connect(&registry, &Registry::interfacesAnnounced, qApp,
+        [&registry, isGet] {
+            const bool hasDpms = registry.hasInterface(Registry::Interface::Dpms);
+
+            DpmsManager *dpmsManager = nullptr;
+            if (hasDpms) {
+                const auto dpmsData = registry.interface(Registry::Interface::Dpms);
+                dpmsManager = registry.createDpmsManager(dpmsData.name, dpmsData.version);
+            }
+
+            // get all Outputs
+            const auto outputs = registry.interfaces(Registry::Interface::Output);
+            static int applyCount = 0;
+	    static int changedCount = 0;
+            for (auto o : outputs) {
+                Output *output = registry.createOutput(o.name, o.version, &registry);
+                if (auto dpms = dpmsManager->getDpms(output)) {
+                    QObject::connect(dpms, &Dpms::supportedChanged, [dpms, outputs, isGet]() {
+                        if (!dpms->isSupported()) {
+			    qDebug() << "output not support dpms!";
+			    qApp->quit();
+			}
+                        if (isGet) {
+			    showDpms(dpms->mode());
+                            ++applyCount;
+                            if (applyCount == outputs.size()) {
+                                qApp->quit();
+                            }
+                        } else {
+			   // if (dpms->mode() == mode) {
+			   //     qDebug() << "output already be " << mode2string(mode);
+			   //     ++applyCount;
+                           //     if (applyCount == outputs.size()) {
+                           //         qApp->quit();
+                           //     }
+			   //     return;
+			   // }
+                            dpms->requestMode(mode);
+                            if (dpms->mode() == mode) {
+			        showDpms(dpms->mode());
+                                qDebug() << "set dpms sucess";
+			        ++applyCount;
+                                if (applyCount == outputs.size()) {
+                                    qApp->quit();
+                                }
+			    }
+                        }
+                    });
+                    QObject::connect(dpms, &Dpms::modeChanged, [dpms, outputs, isGet] {
+			++changedCount;
+                        if (isGet) {
+			    showDpms(dpms->mode());
+                            applyCount = -999;
+                            if (changedCount == outputs.size()) {
+                                qApp->quit();
+                            }
+		        } else {
+                            if (dpms->mode() == mode) {
+		                showDpms(dpms->mode());
+                                qDebug() << "set dpms sucess";
+		                ++applyCount;
+                                if (applyCount == outputs.size()) {
+                                    qApp->quit();
+                                }
+		            }
+			}	
+                    });
+                }
+            }
+        }, Qt::QueuedConnection
+    );
+    registry.setup();
+
+//    QObject::connect(conn, &ConnectionThread::connected, [ & ] {
+//
+//        beConnect = true;
+//        reg = new Registry;
+//        reg->create(conn);
+//        reg->setup();
+//
+//
+//        int count = 100;
+//        do {
+//            beConnect = tmp;
+//            conn->roundtrip();
+//            QThread::msleep(100);
+//        } while (beConnect && count--);
+
+//        if (count <= 0)
+//        {
+//            qDebug() << "time out";
+//        }
+
+//        if (conn)
+//        {
+//            conn->deleteLater();
+//            thread->quit();
+//        }
+//        if (reg)
+//            reg->deleteLater();
+//        exit(0);
+//    });
 
 
    QObject::connect(conn, &ConnectionThread::failed, [conn] {
@@ -299,16 +386,16 @@ int main(int argc, char *argv[])
        beConnect = true;
    });
 
-   QObject::connect(conn, &ConnectionThread::connectionDied, [ & ] {
-       qDebug() << "connect failed to wayland at socket:" << conn->socketName();
-       beConnect = true;
-       if (reg)
-           reg->deleteLater();
-       if (pDpms)
-           pDpms->destroy();
-
-       exit(-1);
-   });
+//   QObject::connect(conn, &ConnectionThread::connectionDied, [ & ] {
+//       qDebug() << "connect failed to wayland at socket:" << conn->socketName();
+//       beConnect = true;
+//       if (reg)
+//           reg->deleteLater();
+//       if (pDpms)
+//           pDpms->destroy();
+//
+//       exit(-1);
+//   });
 
 
     return a.exec();

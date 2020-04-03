@@ -12,6 +12,7 @@ find_package(PkgConfig REQUIRED)
 find_package(Qt5 COMPONENTS
     Core
     DBus
+    Gui
 REQUIRED)
 
 target_link_libraries(${TARGET_NAME}  Qt5::Core)
