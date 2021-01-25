@@ -9,6 +9,8 @@
 #include <output.h>
 #include <iostream>
 #include <QString>
+#include <QTimer>
+#include <QTime>
 
 using namespace KWayland::Client;
 
@@ -17,25 +19,16 @@ static Dpms::Mode mode = Dpms::Mode::Off;
 
 void showDpms(const Dpms::Mode& mode )
 {
-    if (mode == Dpms::Mode::On)
-    {
-        std::cout << "DPMS mode: on" << std::endl;
-    }
-    else if (mode == Dpms::Mode::Off)
-    {
-        std::cout << "DPMS mode: Off" << std::endl;
-    }
-    else if (mode == Dpms::Mode::Standby)
-    {
-        std::cout << "DPMS mode: Standby" << std::endl;
-    }
-    else if (mode == Dpms::Mode::Suspend)
-    {
-        std::cout << "DPMS mode: Suspend" << std::endl;
-    }
-    else
-    {
-        std::cout << "DPMS mode: unknow" << std::endl;
+    if (mode == Dpms::Mode::On) {
+        qDebug() << "DPMS mode: on";
+    } else if (mode == Dpms::Mode::Off) {
+        qDebug() << "DPMS mode: Off";
+    } else if (mode == Dpms::Mode::Standby) {
+        qDebug() << "DPMS mode: Standby";
+    } else if (mode == Dpms::Mode::Suspend) {
+        qDebug() << "DPMS mode: Suspend";
+    } else {
+        qDebug() << "DPMS mode: unknow";
     }
 }
 
@@ -53,7 +46,6 @@ int main(int argc, char *argv[])
 {
     qputenv("QT_QPA_PLATFORM", QByteArrayLiteral("wayland"));
     QGuiApplication a(argc, argv);
-
     // app name
     QCoreApplication::setApplicationName("dpms");
     // app version
@@ -65,11 +57,9 @@ int main(int argc, char *argv[])
     parser.addVersionOption();
     QCommandLineOption getOption(QStringList() << "g" << "get", QCoreApplication::translate("main", "Get dpms."));
     parser.addOption(getOption);
-    QCommandLineOption setOption(QStringList() << "s" << "set",
-                                 QCoreApplication::translate("main", "Set dpms to On/Standby/Suspend/Off"));
+    QCommandLineOption setOption(QStringList() << "s" << "set", QCoreApplication::translate("main", "Set dpms to On/Standby/Suspend/Off"));
     setOption.setValueName("param");
     parser.addOption(setOption);
-
     parser.process(a);
 
     bool isGet = false;
@@ -78,8 +68,7 @@ int main(int argc, char *argv[])
     } else if (parser.isSet(setOption)) {
         isGet = false;
         QString strSetOption = parser.value(setOption);
-        if (strSetOption.compare(QString("On"), Qt::CaseInsensitive) == 0)
-        {
+        if (strSetOption.compare(QString("On"), Qt::CaseInsensitive) == 0) {
             mode = Dpms::Mode::On;
         } else if (strSetOption.compare(QString("Off"), Qt::CaseInsensitive) == 0) {
             mode = Dpms::Mode::Off;
@@ -112,7 +101,7 @@ int main(int argc, char *argv[])
         // get all Outputs
         const auto outputs = registry.interfaces(Registry::Interface::Output);
         static int applyCount = 0;
-        static int changedCount = 0;
+        static int changeCount = 0;
         for (auto o : outputs) {
             Output *output = registry.createOutput(o.name, o.version, &registry);
             if (auto dpms = dpmsManager->getDpms(output)) {
@@ -121,6 +110,7 @@ int main(int argc, char *argv[])
                         qDebug() << "output not support dpms!";
                         qApp->quit();
                     }
+
                     if (isGet) {
                         showDpms(dpms->mode());
                         ++applyCount;
@@ -128,31 +118,31 @@ int main(int argc, char *argv[])
                             qApp->quit();
                         }
                     } else {
-                        dpms->requestMode(mode);
+                        qDebug() << QTime::currentTime().toString(QString::fromLatin1("hh:mm:ss.zzz"))
+                                 << "set dpms mode:" << mode2string(mode);
+
                         if (dpms->mode() == mode) {
-                            showDpms(dpms->mode());
-                            qDebug() << "set dpms sucess";
+                            qDebug() << QTime::currentTime().toString(QString::fromLatin1("hh:mm:ss.zzz"))
+                                     << "new dpms equal the old, no need to set.";
                             ++applyCount;
                             if (applyCount == outputs.size()) {
                                 qApp->quit();
                             }
+                            return;
                         }
+
+                        ++changeCount;
+                        dpms->requestMode(mode);
                     }
                 });
+
                 QObject::connect(dpms, &Dpms::modeChanged, [dpms, outputs, isGet] {
-                    ++changedCount;
-                    if (isGet) {
-                        showDpms(dpms->mode());
-                        applyCount = -999;
-                        if (changedCount == outputs.size()) {
-                            qApp->quit();
-                        }
-                    } else {
-                        if (dpms->mode() == mode) {
-                            showDpms(dpms->mode());
-                            qDebug() << "set dpms sucess";
-                            ++applyCount;
-                            if (applyCount == outputs.size()) {
+                    Q_UNUSED(isGet)
+                    if (!isGet) {
+                        if (changeCount > 0 && dpms->mode() == mode) {
+                            qDebug() << "set dpms mode:" << mode2string(mode) << "success.";
+                            --changeCount;
+                            if (changeCount == 0) {
                                 qApp->quit();
                             }
                         }
@@ -162,11 +152,12 @@ int main(int argc, char *argv[])
         }
     }, Qt::QueuedConnection
     );
-    registry.setup();
 
     QObject::connect(conn, &ConnectionThread::failed, [conn] {
         qDebug() << "connect failed to wayland at socket:" << conn->socketName();
     });
+
+    registry.setup();
 
     return a.exec();
 }
